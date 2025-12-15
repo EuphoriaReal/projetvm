@@ -1,0 +1,48 @@
+services:
+  registry:
+    image: registry:2
+    container_name: bomb_registry
+    ports:
+      - "5001:5000"
+    volumes:
+      - registry_data:/var/lib/registry
+    networks:
+      bomb_network:
+        ipv4_address: 172.20.0.2
+    restart: unless-stopped
+
+  player1:
+    image: 192.168.1.10:5001/bomb-player:latest  # IP de VM1
+    container_name: bomb_player1
+    networks:
+      bomb_network:
+        ipv4_address: 172.20.0.11
+    environment:
+      - PLAYER_NAME=RedKnight
+      - SERVER_HOST=192.168.1.11  # IP de VM2 où est le serveur
+      - SERVER_PORT=5000
+      - REACTION_TIME=2.5
+    restart: unless-stopped
+
+  player3:
+    image: 192.168.1.10:5001/bomb-player:latest
+    container_name: bomb_player3
+    networks:
+      bomb_network:
+        ipv4_address: 172.20.0.13
+    environment:
+      - PLAYER_NAME=BlueWizard
+      - SERVER_HOST=192.168.1.11
+      - SERVER_PORT=5000
+      - REACTION_TIME=1.8
+    restart: unless-stopped
+
+volumes:
+  registry_data:
+
+networks:
+  bomb_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
