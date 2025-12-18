@@ -73,6 +73,7 @@
             font-weight: bold;
             color: #d63031;
             text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+            transition: color 0.3s;
         }
 
         .timer-label {
@@ -152,6 +153,12 @@
             font-size: 3em;
             text-align: center;
             margin-top: 10px;
+            animation: bounce 0.5s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
         }
 
         .events-log {
@@ -173,6 +180,15 @@
             border-radius: 5px;
             background: white;
             border-left: 4px solid #6c5ce7;
+            font-size: 0.95em;
+        }
+
+        .event.join {
+            border-left-color: #00b894;
+        }
+
+        .event.bomb_passed {
+            border-left-color: #fdcb6e;
         }
 
         .event.explosion {
@@ -181,6 +197,12 @@
 
         .event.winner {
             border-left-color: #00b894;
+            font-weight: bold;
+            background: #d4edda;
+        }
+
+        .event.game_start {
+            border-left-color: #6c5ce7;
             font-weight: bold;
         }
 
@@ -192,6 +214,7 @@
             border-radius: 20px;
             font-weight: bold;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
         }
 
         .connection-status.connected {
@@ -202,6 +225,17 @@
         .connection-status.disconnected {
             background: #d63031;
             color: white;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
         }
     </style>
 </head>
@@ -215,7 +249,7 @@
         <p class="subtitle">Surveillance en temps réel de la partie</p>
 
         <div class="status waiting" id="gameStatus">
-            En attente de joueurs...
+            En attente de connexion...
         </div>
 
         <div class="bomb-timer" id="bombTimer" style="display: none;">
@@ -224,110 +258,74 @@
         </div>
 
         <div class="players-grid" id="playersGrid">
-            <!-- Les joueurs seront ajoutés dynamiquement -->
+            <div class="empty-state">
+                <div class="empty-state-icon">🎮</div>
+                <p>En attente de joueurs...</p>
+            </div>
         </div>
 
         <div class="events-log">
             <h3>Journal des événements</h3>
             <div id="eventsContainer">
-                <div class="event">🎮 En attente de connexion au serveur...</div>
+                <div class="event">En attente de connexion au serveur...</div>
             </div>
         </div>
     </div>
 
     <script>
-        // Configuration - À ADAPTER selon votre réseau
-        const SERVER_HOST = window.location.hostname;
-        const SERVER_PORT = 5000;
-        
-        let ws = null;
-        let reconnectTimeout = null;
-        const events = [];
-        const maxEvents = 10;
+        // Configuration
+        const SERVER_HOST = window.location.hostname === 'localhost' ? 'localhost' : window.location.hostname;
+        const API_URL = `http://${SERVER_HOST}:8080/api/state`;
+        const REFRESH_INTERVAL = 500; // 500ms pour une mise à jour fluide
 
-        function connectWebSocket() {
-            const wsUrl = `ws://${SERVER_HOST}:${SERVER_PORT}`;
-            
-            console.log('Tentative de connexion WebSocket...', wsUrl);
-            
-            // NOTE: Ce code utilise WebSocket qui nécessite une modification du serveur
-            // Pour l'instant, on va simuler avec du polling HTTP
-            connectHTTP();
-        }
+        let lastState = null;
 
-        function connectHTTP() {
-            // Alternative : polling HTTP (plus simple à implémenter)
-            addEvent('info', 'Mode polling HTTP activé (rafraîchissement toutes les 2s)');
-            updateConnectionStatus(true);
-            
-            // Simuler des données pour la démo
-            simulateGame();
-        }
-
-        function simulateGame() {
-            // Simulation pour la démonstration
-            const playerNames = ['RedKnight', 'GreenArcher', 'BlueWizard', 'YellowSamurai'];
-            const players = playerNames.map((name, i) => ({
-                name,
-                alive: true,
-                hasBomb: i === 0
-            }));
-
-            updatePlayers(players);
-            updateGameStatus('playing', 'RedKnight');
-            
-            let timer = 8.5;
-            let currentHolder = 0;
-
-            const interval = setInterval(() => {
-                timer -= 0.1;
+        // Fonction principale pour récupérer l'état du jeu
+        async function fetchGameState() {
+            try {
+                const response = await fetch(API_URL);
                 
-                if (timer <= 0) {
-                    // Explosion
-                    players[currentHolder].alive = false;
-                    addEvent('explosion', `${players[currentHolder].name} a explosé !`);
-                    
-                    // Trouver le prochain joueur vivant
-                    const alivePlayers = players.filter(p => p.alive);
-                    
-                    if (alivePlayers.length === 1) {
-                        addEvent('winner', `${alivePlayers[0].name} a gagné la partie !`);
-                        clearInterval(interval);
-                        updateGameStatus('waiting');
-                        return;
-                    }
-                    
-                    // Nouveau porteur
-                    players[currentHolder].hasBomb = false;
-                    do {
-                        currentHolder = (currentHolder + 1) % players.length;
-                    } while (!players[currentHolder].alive);
-                    
-                    players[currentHolder].hasBomb = true;
-                    timer = Math.random() * 8 + 4;
-                    
-                    addEvent('info', `💣 ${players[currentHolder].name} a maintenant la bombe !`);
-                    updateGameStatus('playing', players[currentHolder].name);
-                } else if (Math.random() < 0.05) {
-                    // Passage de bombe occasionnel
-                    const oldHolder = currentHolder;
-                    players[oldHolder].hasBomb = false;
-                    
-                    do {
-                        currentHolder = (currentHolder + 1) % players.length;
-                    } while (!players[currentHolder].alive);
-                    
-                    players[currentHolder].hasBomb = true;
-                    
-                    addEvent('info', `${players[oldHolder].name} passe la bombe à ${players[currentHolder].name}`);
-                    updateGameStatus('playing', players[currentHolder].name);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                updateTimer(timer);
-                updatePlayers(players);
-            }, 100);
+                const state = await response.json();
+                
+                // Première connexion réussie
+                if (document.getElementById('connectionStatus').classList.contains('disconnected')) {
+                    updateConnectionStatus(true);
+                    addLocalEvent('info', 'Connecté au serveur');
+                }
+                
+                updateUI(state);
+                lastState = state;
+                
+            } catch (error) {
+                console.error('Erreur lors de la récupération de l\'état:', error);
+                updateConnectionStatus(false);
+                
+                if (lastState === null) {
+                    // Première tentative échouée
+                    addLocalEvent('error', 'Impossible de se connecter au serveur');
+                }
+            }
         }
 
+        // Mettre à jour l'interface utilisateur
+        function updateUI(state) {
+            updateGameStatus(state);
+            updatePlayers(state.players);
+            updateEvents(state.events);
+            
+            if (state.game_started && state.timer > 0) {
+                updateTimer(state.timer);
+                document.getElementById('bombTimer').style.display = 'block';
+            } else {
+                document.getElementById('bombTimer').style.display = 'none';
+            }
+        }
+
+        // Mettre à jour le statut de connexion
         function updateConnectionStatus(connected) {
             const statusEl = document.getElementById('connectionStatus');
             if (connected) {
@@ -339,21 +337,21 @@
             }
         }
 
-        function updateGameStatus(status, currentHolder = null) {
+        // Mettre à jour le statut du jeu
+        function updateGameStatus(state) {
             const statusEl = document.getElementById('gameStatus');
-            const timerEl = document.getElementById('bombTimer');
             
-            if (status === 'waiting') {
+            if (!state.game_started) {
                 statusEl.className = 'status waiting';
-                statusEl.textContent = 'En attente de joueurs...';
-                timerEl.style.display = 'none';
-            } else if (status === 'playing') {
+                const playerCount = state.players.length;
+                statusEl.textContent = `En attente de joueurs... (${playerCount} connectés)`;
+            } else if (state.current_holder) {
                 statusEl.className = 'status playing';
-                statusEl.textContent = `Partie en cours - ${currentHolder} a la bombe !`;
-                timerEl.style.display = 'block';
+                statusEl.textContent = `Partie en cours - ${state.current_holder} a la bombe !`;
             }
         }
 
+        // Mettre à jour le timer
         function updateTimer(seconds) {
             const timerEl = document.getElementById('timerDisplay');
             timerEl.textContent = seconds.toFixed(1);
@@ -368,36 +366,88 @@
             }
         }
 
+        // Mettre à jour les joueurs
         function updatePlayers(players) {
             const gridEl = document.getElementById('playersGrid');
             
+            if (players.length === 0) {
+                gridEl.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🎮</div>
+                        <p>En attente de joueurs...</p>
+                    </div>
+                `;
+                return;
+            }
+            
             gridEl.innerHTML = players.map(player => `
-                <div class="player-card ${player.alive ? 'alive' : 'dead'} ${player.hasBomb ? 'has-bomb' : ''}">
-                    <div class="player-name">${player.name}</div>
+                <div class="player-card ${player.alive ? 'alive' : 'dead'} ${player.has_bomb ? 'has-bomb' : ''}">
+                    <div class="player-name">${escapeHtml(player.name)}</div>
                     <span class="player-status ${player.alive ? 'alive' : 'dead'}">
                         ${player.alive ? 'VIVANT' : 'MORT'}
                     </span>
-                    ${player.hasBomb ? '<div class="bomb-indicator">💣</div>' : ''}
+                    ${player.has_bomb ? '<div class="bomb-indicator">💣</div>' : ''}
                 </div>
             `).join('');
         }
 
-        function addEvent(type, message) {
-            events.unshift({ type, message, time: new Date() });
-            if (events.length > maxEvents) {
-                events.pop();
+        // Mettre à jour les événements
+        function updateEvents(events) {
+            const container = document.getElementById('eventsContainer');
+            
+            if (!events || events.length === 0) {
+                container.innerHTML = '<div class="event">Aucun événement pour le moment</div>';
+                return;
             }
             
-            const container = document.getElementById('eventsContainer');
-            container.innerHTML = events.map(event => `
-                <div class="event ${event.type}">
-                    <small>${event.time.toLocaleTimeString()}</small> - ${event.message}
-                </div>
-            `).join('');
+            container.innerHTML = events.map(event => {
+                const date = new Date(event.timestamp * 1000);
+                const timeStr = date.toLocaleTimeString('fr-FR');
+                
+                return `
+                    <div class="event ${event.type}">
+                        <small>${timeStr}</small> - ${escapeHtml(event.message)}
+                    </div>
+                `;
+            }).join('');
         }
 
-        // Démarrer la connexion au chargement
-        window.addEventListener('load', connectWebSocket);
+        // Ajouter un événement local (non provenant du serveur)
+        function addLocalEvent(type, message) {
+            const container = document.getElementById('eventsContainer');
+            const timeStr = new Date().toLocaleTimeString('fr-FR');
+            
+            const eventEl = document.createElement('div');
+            eventEl.className = `event ${type}`;
+            eventEl.innerHTML = `<small>${timeStr}</small> - ${escapeHtml(message)}`;
+            
+            container.insertBefore(eventEl, container.firstChild);
+            
+            // Limiter le nombre d'événements affichés
+            while (container.children.length > 10) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        // Échapper le HTML pour éviter les injections XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Démarrer le polling
+        function startPolling() {
+            fetchGameState();
+            setInterval(fetchGameState, REFRESH_INTERVAL);
+        }
+
+        // Démarrer au chargement de la page
+        window.addEventListener('load', () => {
+            console.log('Dashboard démarré');
+            console.log('API URL:', API_URL);
+            startPolling();
+        });
     </script>
 </body>
 </html>
